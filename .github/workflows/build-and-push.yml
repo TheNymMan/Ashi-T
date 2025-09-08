@@ -2,8 +2,7 @@ name: build-and-push
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches: [ main ]  # Build automatically on pushes to main
 
 permissions:
   contents: read
@@ -19,12 +18,11 @@ jobs:
       - name: Prepare artifacts directory
         run: mkdir -p artifacts
 
-      - name: Install Tor and fetch artifacts over Tor
+      - name: Install Tor and fetch artifacts over Tor (v1.0.0, amd64)
         run: |
           set -eux
           sudo apt-get update
           sudo apt-get install -y tor torsocks gnupg curl coreutils
-          # Write a minimal torrc for the job
           cat > /tmp/torrc <<'EOF'
           RunAsDaemon 0
           DataDirectory /var/lib/tor
@@ -34,18 +32,15 @@ jobs:
           Log notice stdout
           EOF
           tor -f /tmp/torrc &
-          # Wait for SOCKS
           for i in $(seq 1 60); do
             (echo > /dev/tcp/127.0.0.1/9050) >/dev/null 2>&1 && break
             sleep 1
             if [ "$i" -eq 60 ]; then echo "Tor SOCKS not ready"; exit 1; fi
           done
-          # Download artifacts (v1.0.0, amd64)
           torsocks wget -O artifacts/ashigaru_terminal_v1.0.0_amd64.deb \
             "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v1.0.0/ashigaru_terminal_v1.0.0_amd64.deb"
           torsocks wget -O artifacts/ashigaru_terminal_v1.0.0_signed_hashes.txt \
             "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v1.0.0/ashigaru_terminal_v1.0.0_signed_hashes.txt"
-          # Verify PGP + SHA256
           curl -sS https://keybase.io/ashigarudev/pgp_keys.asc | gpg --import
           gpg --verify artifacts/ashigaru_terminal_v1.0.0_signed_hashes.txt
           exp=$(awk '/File name: ashigaru_terminal_v1.0.0_amd64.deb/{getline; print $NF; exit}' artifacts/ashigaru_terminal_v1.0.0_signed_hashes.txt)
@@ -63,16 +58,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
-        id: meta
+      - name: Compute image metadata (version + tags + icon)
+        id: vars
         run: |
-          REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            VER="${GITHUB_REF_NAME#v}"
-            echo "tags=${REPO}:${VER},${REPO}:latest" >> $GITHUB_OUTPUT
-          else
-            echo "tags=${REPO}:edge" >> $GITHUB_OUTPUT
-          fi
+          # Lowercased repo path for GHCR
+          echo "repo=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+          # Fixed version 1.0.0 (matches your Dockerfile build arg)
+          echo "version=1.0.0" >> $GITHUB_OUTPUT
+          # Icon URL pointing to your repo's icon (adjust branch/path if needed)
+          echo "icon_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/assets/icon.png" >> $GITHUB_OUTPUT
+          # Final tags (always 1.0.0 and latest)
+          echo "tags=ghcr.io/${GITHUB_REPOSITORY,,}:1.0.0,ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> $GITHUB_OUTPUT
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -80,4 +76,4 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.vars.outputs.tags }}
