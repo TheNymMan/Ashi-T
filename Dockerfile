@@ -1,6 +1,19 @@
 # syntax=docker/dockerfile:1.6
 FROM ubuntu:22.04
 
+# Add build args for version and icon URL (adjust defaults)
+ARG ASHI_VERSION=1.0.0
+ARG ICON_URL="https://raw.githubusercontent.com/TheNymMan/Ashi-T/refs/heads/main/assets/icon.png"
+
+# OCI metadata + Portainer icon
+LABEL org.opencontainers.image.title="Ashigaru Terminal (ttyd + Tor)" \
+      org.opencontainers.image.description="Ashigaru Terminal in a tmux session, served via ttyd, with a built-in Tor SOCKS proxy." \
+      org.opencontainers.image.url="https://ashigaru.rs" \
+      org.opencontainers.image.source="https://github.com/TheNymMan/Ashi-T" \
+      org.opencontainers.image.version="${ASHI_VERSION}" \
+      org.opencontainers.image.licenses="MIT" \
+      io.portainer.icon="${ICON_URL}"
+
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tmux ttyd tini gosu procps tor torsocks \
