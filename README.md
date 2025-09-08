@@ -12,7 +12,7 @@ This image runs Ashigaru Terminal inside a container and serves it to your brows
 ## Pull the image
 
 ```bash
-docker pull ghcr.io/OWNER/REPO:latest
+docker pull ghcr.io/thenymman/ashi-t:edge@sha256:3c71a278c0a8c8f6971374fbd0eba0b416dbe1ccdb83d34452d82ed89e164b5d
 ```
 
 ## Run locally (binds to localhost)
