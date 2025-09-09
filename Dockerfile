@@ -20,19 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tmux ttyd tini gosu procps tor torsocks \
     && rm -rf /var/lib/apt/lists/*
 
-# If building the arm64 variant, point apt to ports.ubuntu.com,
-# install qemu-user-static, and enable dpkg multiarch for amd64.
+# If building the arm64 variant, enable dpkg multiarch so apt can resolve
+# amd64 dependencies during install. We rely on host binfmt for runtime emulation.
 RUN set -eux; \
   if [ "${TARGETARCH:-}" = "arm64" ]; then \
-    . /etc/os-release; \
-    printf '%s\n' \
-      "deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME} main universe multiverse restricted" \
-      "deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-updates main universe multiverse restricted" \
-      "deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-security main universe multiverse restricted" \
-      > /etc/apt/sources.list; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends qemu-user-static; \
     dpkg --add-architecture amd64; \
+    # Tell apt to consider both arches
+    echo 'APT::Architectures "arm64;amd64";' > /etc/apt/apt.conf.d/00arch; \
     apt-get update; \
   fi; \
   rm -rf /var/lib/apt/lists/*
