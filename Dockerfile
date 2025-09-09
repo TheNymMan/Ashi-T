@@ -20,9 +20,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tmux ttyd tini gosu procps tor torsocks \
     && rm -rf /var/lib/apt/lists/*
 
-# If building the arm64 variant, prepare qemu-user emulation and multiarch libs
+# If building the arm64 variant, enable universe, install qemu-user-static,
+# and enable dpkg multiarch so we can install amd64 libs if needed.
 RUN set -eux; \
   if [ "${TARGETARCH:-}" = "arm64" ]; then \
+    apt-get update; \
+    apt-get install -y --no-install-recommends software-properties-common ca-certificates gnupg; \
+    # Enable 'universe' (needed for qemu-user-static). Try helper, fall back to manual.
+    add-apt-repository -y universe || { \
+      . /etc/os-release; \
+      echo "deb http://archive.ubuntu.com/ubuntu ${UBUNTU_CODENAME} universe" \
+        > /etc/apt/sources.list.d/universe.list; \
+      echo "deb http://archive.ubuntu.com/ubuntu ${UBUNTU_CODENAME}-updates universe" \
+        >> /etc/apt/sources.list.d/universe.list; \
+      echo "deb http://archive.ubuntu.com/ubuntu ${UBUNTU_CODENAME}-security universe" \
+        >> /etc/apt/sources.list.d/universe.list; \
+    }; \
     apt-get update; \
     apt-get install -y --no-install-recommends qemu-user-static; \
     dpkg --add-architecture amd64; \
