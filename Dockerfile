@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 
 # Add build args for version and icon URL (adjust defaults)
 ARG ASHI_VERSION=1.0.0
-ARG ICON_URL="https://raw.githubusercontent.com/TheNymMan/Ashi-T/refs/heads/main/assets/icon.png"
+ARG ICON_URL="https://raw.githubusercontent.com/TheNymMan/Ashi-T/main/assets/icon.png"
 ARG TARGETARCH
 
 # OCI metadata + Portainer icon
@@ -20,17 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tmux ttyd tini gosu procps tor torsocks \
     && rm -rf /var/lib/apt/lists/*
 
-# If building the arm64 variant, make sure apt sources use ports.ubuntu.com
-# (arm64), then install qemu-user-static and enable dpkg multiarch so we can
-# install amd64 libs for the Ashigaru .deb.
+# If building the arm64 variant, point apt to ports.ubuntu.com,
+# install qemu-user-static, and enable dpkg multiarch for amd64.
 RUN set -eux; \
   if [ "${TARGETARCH:-}" = "arm64" ]; then \
     . /etc/os-release; \
-    cat > /etc/apt/sources.list <<EOF
-deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME} main universe multiverse restricted
-deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-updates main universe multiverse restricted
-deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-security main universe multiverse restricted
-EOF
+    printf '%s\n' \
+      "deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME} main universe multiverse restricted" \
+      "deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-updates main universe multiverse restricted" \
+      "deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-security main universe multiverse restricted" \
+      > /etc/apt/sources.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends qemu-user-static; \
     dpkg --add-architecture amd64; \
