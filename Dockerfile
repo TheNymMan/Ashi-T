@@ -20,22 +20,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tmux ttyd tini gosu procps tor torsocks \
     && rm -rf /var/lib/apt/lists/*
 
-# If building the arm64 variant, enable universe, install qemu-user-static,
-# and enable dpkg multiarch so we can install amd64 libs if needed.
+# If building the arm64 variant, make sure apt sources use ports.ubuntu.com
+# (arm64), then install qemu-user-static and enable dpkg multiarch so we can
+# install amd64 libs for the Ashigaru .deb.
 RUN set -eux; \
   if [ "${TARGETARCH:-}" = "arm64" ]; then \
-    apt-get update; \
-    apt-get install -y --no-install-recommends software-properties-common ca-certificates gnupg; \
-    # Enable 'universe' (needed for qemu-user-static). Try helper, fall back to manual.
-    add-apt-repository -y universe || { \
-      . /etc/os-release; \
-      echo "deb http://archive.ubuntu.com/ubuntu ${UBUNTU_CODENAME} universe" \
-        > /etc/apt/sources.list.d/universe.list; \
-      echo "deb http://archive.ubuntu.com/ubuntu ${UBUNTU_CODENAME}-updates universe" \
-        >> /etc/apt/sources.list.d/universe.list; \
-      echo "deb http://archive.ubuntu.com/ubuntu ${UBUNTU_CODENAME}-security universe" \
-        >> /etc/apt/sources.list.d/universe.list; \
-    }; \
+    . /etc/os-release; \
+    cat > /etc/apt/sources.list <<EOF
+deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME} main universe multiverse restricted
+deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-updates main universe multiverse restricted
+deb http://ports.ubuntu.com/ubuntu-ports ${UBUNTU_CODENAME}-security main universe multiverse restricted
+EOF
     apt-get update; \
     apt-get install -y --no-install-recommends qemu-user-static; \
     dpkg --add-architecture amd64; \
