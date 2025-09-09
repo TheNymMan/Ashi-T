@@ -4,6 +4,7 @@ FROM ubuntu:22.04
 # Add build args for version and icon URL (adjust defaults)
 ARG ASHI_VERSION=1.0.0
 ARG ICON_URL="https://raw.githubusercontent.com/TheNymMan/Ashi-T/refs/heads/main/assets/icon.png"
+ARG TARGETARCH
 
 # OCI metadata + Portainer icon
 LABEL org.opencontainers.image.title="Ashigaru Terminal (ttyd + Tor)" \
@@ -19,28 +20,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tmux ttyd tini gosu procps tor torsocks \
     && rm -rf /var/lib/apt/lists/*
 
+# If building the arm64 variant, prepare qemu-user emulation and multiarch libs
+RUN set -eux; \
+  if [ "${TARGETARCH:-}" = "arm64" ]; then \
+    apt-get update; \
+    apt-get install -y --no-install-recommends qemu-user-static; \
+    dpkg --add-architecture amd64; \
+    apt-get update; \
+  fi; \
+  rm -rf /var/lib/apt/lists/*
+
 # Create non-root user
 RUN useradd -m -u 1000 -s /bin/bash ashigaru
 
-# Copy pre-fetched, verified artifacts from the repo context
-# (GitHub Actions job will place them in ./artifacts)
-COPY artifacts/ashigaru_terminal_v1.0.0_amd64.deb /tmp/
-COPY artifacts/ashigaru_terminal_v1.0.0_signed_hashes.txt /tmp/
+# Bring in artifacts (the workflow fetches these)
+# amd64 .deb is used for both variants; arm64 runs it via qemu + multiarch libs
+COPY artifacts/ashigaru_terminal_v${ASHI_VERSION}_amd64.deb /tmp/ashigaru_amd64.deb
+COPY artifacts/ashigaru_terminal_v${ASHI_VERSION}_signed_hashes.txt /tmp/signed_hashes.txt
 
-# Re-check SHA256 inside the build (defense in depth)
-RUN set -e; \
-  exp="$(awk '/File name: ashigaru_terminal_v1.0.0_amd64.deb/{getline; print $NF; exit}' \
-    /tmp/ashigaru_terminal_v1.0.0_signed_hashes.txt)"; \
-  [ -n "$exp" ] && [ "${#exp}" -eq 64 ] || { \
-    echo "Failed to parse expected SHA256 from signed_hashes.txt" >&2; exit 1; }; \
-  act="$(sha256sum /tmp/ashigaru_terminal_v1.0.0_amd64.deb | awk '{print $1}')"; \
-  test "$exp" = "$act"
-
-# Install Ashigaru, resolving deps if needed
-RUN set -e; \
-  dpkg -i /tmp/ashigaru_terminal_v1.0.0_amd64.deb || \
-    (apt-get update && apt-get -f install -y && rm -rf /var/lib/apt/lists/*); \
-  rm -f /tmp/ashigaru_terminal_v1.0.0_amd64.deb
+# Verify SHA256 and install the amd64 package
+RUN set -eux; \
+  exp="$(awk "/File name: ashigaru_terminal_v${ASHI_VERSION}_amd64.deb/{getline; print $NF; exit}" \
+    /tmp/signed_hashes.txt)"; \
+  [ -n "$exp" ] && [ "${#exp}" -eq 64 ] || { echo "Failed to parse SHA256"; exit 1; }; \
+  act="$(sha256sum /tmp/ashigaru_amd64.deb | awk '{print $1}')"; \
+  test "$exp" = "$act"; \
+  # On amd64 variant, this installs natively; on arm64, apt can resolve amd64 deps because of multiarch
+  dpkg -i /tmp/ashigaru_amd64.deb || (apt-get update && apt-get -f install -y && rm -rf /var/lib/apt/lists/*); \
+  rm -f /tmp/ashigaru_amd64.deb
 
 # Runtime env
 ENV TERM=xterm-256color \
