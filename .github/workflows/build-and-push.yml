@@ -2,7 +2,15 @@ name: build-and-push
 
 on:
   push:
-    branches: [ main ]  # or use tags if you prefer
+    branches: [ main ]
+    tags: [ 'v*' ]
+    paths-ignore:
+      - '**/*.md'
+      - 'LICENSE'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/CODEOWNERS'
+      - 'docs/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,18 +19,26 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Read VERSION
+        id: ver
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+
       - name: Prepare artifacts directory
         run: mkdir -p artifacts
 
-      - name: Install Tor and fetch artifacts over Tor (v1.0.0, amd64)
+      - name: Install Tor and fetch artifacts over Tor
         run: |
           set -eux
+          V="${{ steps.ver.outputs.version }}"
           sudo apt-get update
           sudo apt-get install -y tor torsocks gnupg curl coreutils
+
+          # Minimal torrc
           cat > /tmp/torrc <<'EOF'
           RunAsDaemon 0
           DataDirectory /var/lib/tor
@@ -31,21 +47,28 @@ jobs:
           SocksPort 127.0.0.1:9050
           Log notice stdout
           EOF
+
           tor -f /tmp/torrc &
           for i in $(seq 1 60); do
             (echo > /dev/tcp/127.0.0.1/9050) >/dev/null 2>&1 && break
             sleep 1
             if [ "$i" -eq 60 ]; then echo "Tor SOCKS not ready"; exit 1; fi
           done
-          torsocks wget -O artifacts/ashigaru_terminal_v1.0.0_amd64.deb \
-            "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v1.0.0/ashigaru_terminal_v1.0.0_amd64.deb"
-          torsocks wget -O artifacts/ashigaru_terminal_v1.0.0_signed_hashes.txt \
-            "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v1.0.0/ashigaru_terminal_v1.0.0_signed_hashes.txt"
+
+          # Download versioned artifacts (amd64 .deb + signed hashes)
+          torsocks wget -O "artifacts/ashigaru_terminal_v${V}_amd64.deb" \
+            "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v${V}/ashigaru_terminal_v${V}_amd64.deb"
+
+          torsocks wget -O "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt" \
+            "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v${V}/ashigaru_terminal_v${V}_signed_hashes.txt"
+
+          # Verify PGP + SHA256
           curl -sS https://keybase.io/ashigarudev/pgp_keys.asc | gpg --import
-          gpg --verify artifacts/ashigaru_terminal_v1.0.0_signed_hashes.txt
-          exp=$(awk '/File name: ashigaru_terminal_v1.0.0_amd64.deb/{getline; print $NF; exit}' artifacts/ashigaru_terminal_v1.0.0_signed_hashes.txt)
+          gpg --verify "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt"
+
+          exp=$(awk "/File name: ashigaru_terminal_v${V}_amd64.deb/{getline; print $NF; exit}" "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt")
           [ -n "$exp" ] && [ "${#exp}" -eq 64 ]
-          act=$(sha256sum artifacts/ashigaru_terminal_v1.0.0_amd64.deb | awk '{print $1}')
+          act=$(sha256sum "artifacts/ashigaru_terminal_v${V}_amd64.deb" | awk '{print $1}')
           test "$exp" = "$act"
 
       - name: Set up QEMU (for multi-arch build)
@@ -61,15 +84,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image metadata
+      - name: Compute image tags and icon URL
         id: vars
         run: |
-          echo "repo=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
-          echo "version=1.0.0" >> $GITHUB_OUTPUT
+          REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
+          VER="${{ steps.ver.outputs.version }}"
+          echo "repo=${REPO}" >> $GITHUB_OUTPUT
+          echo "version=${VER}" >> $GITHUB_OUTPUT
           echo "icon_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/assets/icon.png" >> $GITHUB_OUTPUT
-          echo "tags=ghcr.io/${GITHUB_REPOSITORY,,}:1.0.0,ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> $GITHUB_OUTPUT
 
-      - name: Build and push multi-arch (amd64 + arm64 via qemu)
+          # If pushing a tag vX.Y.Z, publish X.Y.Z and latest
+          # Otherwise (main), still publish X.Y.Z and latest for convenience
+          echo "tags=${REPO}:${VER},${REPO}:latest" >> $GITHUB_OUTPUT
+
+      - name: Build and push multi-arch
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -78,5 +106,5 @@ jobs:
           provenance: false
           tags: ${{ steps.vars.outputs.tags }}
           build-args: |
-            ASHI_VERSION=${{ steps.vars.outputs.version }}
+            ASHI_VERSION=${{ steps.ver.outputs.version }}
             ICON_URL=${{ steps.vars.outputs.icon_url }}
