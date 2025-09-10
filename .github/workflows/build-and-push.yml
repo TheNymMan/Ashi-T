@@ -62,14 +62,22 @@ jobs:
           torsocks wget -O "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt" \
             "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v${V}/ashigaru_terminal_v${V}_signed_hashes.txt"
 
-          # Verify PGP + SHA256
+      - name: Verification — Import Ashigaru PGP key
+        run: |
+          set -eux
           curl -sS https://keybase.io/ashigarudev/pgp_keys.asc | gpg --import
+          gpg --list-keys
+
+      - name: Verification — Verify signature of signed_hashes.txt
+        run: |
+          set -eux
+          V="${{ steps.ver.outputs.version }}"
           gpg --verify "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt"
 
-          exp=$(awk "/File name: ashigaru_terminal_v${V}_amd64.deb/{getline; print $NF; exit}" "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt")
-          [ -n "$exp" ] && [ "${#exp}" -eq 64 ]
-          act=$(sha256sum "artifacts/ashigaru_terminal_v${V}_amd64.deb" | awk '{print $1}')
-          test "$exp" = "$act"
+      - name: Verification — Check SHA256 of .deb matches signed hashes
+        run: |
+          set -eux
+          V="${{ steps.ver.outputs
 
       - name: Set up QEMU (for multi-arch build)
         uses: docker/setup-qemu-action@v3
