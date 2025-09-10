@@ -26,19 +26,26 @@ jobs:
 
       - name: Read VERSION
         id: ver
-        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+        run: |
+          set -euo pipefail
+          test -f VERSION || { echo "Missing VERSION file"; exit 1; }
+          V=$(cat VERSION)
+          test -n "$V" || { echo "VERSION is empty"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "Will build version: $V"
 
       - name: Prepare artifacts directory
         run: mkdir -p artifacts
 
-      - name: Install Tor and fetch artifacts over Tor
+      - name: Install Tor and tools
         run: |
-          set -eux
-          V="${{ steps.ver.outputs.version }}"
+          set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y tor torsocks gnupg curl coreutils
 
-          # Minimal torrc
+      - name: Start Tor (SOCKS 127.0.0.1:9050) and wait
+        run: |
+          set -euo pipefail
           cat > /tmp/torrc <<'EOF'
           RunAsDaemon 0
           DataDirectory /var/lib/tor
@@ -47,7 +54,6 @@ jobs:
           SocksPort 127.0.0.1:9050
           Log notice stdout
           EOF
-
           tor -f /tmp/torrc &
           for i in $(seq 1 60); do
             (echo > /dev/tcp/127.0.0.1/9050) >/dev/null 2>&1 && break
@@ -55,29 +61,46 @@ jobs:
             if [ "$i" -eq 60 ]; then echo "Tor SOCKS not ready"; exit 1; fi
           done
 
-          # Download versioned artifacts (amd64 .deb + signed hashes)
+      - name: Download artifacts over Tor
+        run: |
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
           torsocks wget -O "artifacts/ashigaru_terminal_v${V}_amd64.deb" \
             "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v${V}/ashigaru_terminal_v${V}_amd64.deb"
-
           torsocks wget -O "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt" \
             "http://ashicodepbnpvslzsl2bz7l2pwrjvajgumgac423pp3y2deprbnzz7id.onion/Ashigaru/Ashigaru-Terminal/releases/download/v${V}/ashigaru_terminal_v${V}_signed_hashes.txt"
 
+      # === Verification section (PGP signature + SHA256 hash) ===
+
       - name: Verification — Import Ashigaru PGP key
         run: |
-          set -eux
+          set -euo pipefail
           curl -sS https://keybase.io/ashigarudev/pgp_keys.asc | gpg --import
           gpg --list-keys
 
       - name: Verification — Verify signature of signed_hashes.txt
         run: |
-          set -eux
+          set -euo pipefail
           V="${{ steps.ver.outputs.version }}"
           gpg --verify "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt"
 
       - name: Verification — Check SHA256 of .deb matches signed hashes
         run: |
-          set -eux
-          V="${{ steps.ver.outputs
+          set -euo pipefail
+          V="${{ steps.ver.outputs.version }}"
+          # Normalize possible CRLF line endings (defense in depth)
+          sed -i 's/\r$//' "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt"
+          NAME="ashigaru_terminal_v${V}_amd64.deb"
+          EXP=$(awk -v n="$NAME" '$0 ~ "File name: " n {getline; print $NF; exit}' \
+            "artifacts/ashigaru_terminal_v${V}_signed_hashes.txt")
+          ACT=$(sha256sum "artifacts/${NAME}" | awk '{print $1}')
+          echo "Expected: $EXP"
+          echo "Actual:   $ACT"
+          test -n "$EXP" && [ ${#EXP} -eq 64 ] || { echo "Failed to parse expected SHA256"; exit 1; }
+          test "$EXP" = "$ACT" || { echo "SHA256 mismatch"; exit 1; }
+          echo "SHA256 OK"
+
+      # === Build and publish multi-arch image ===
 
       - name: Set up QEMU (for multi-arch build)
         uses: docker/setup-qemu-action@v3
@@ -95,15 +118,15 @@ jobs:
       - name: Compute image tags and icon URL
         id: vars
         run: |
+          set -euo pipefail
           REPO="ghcr.io/${GITHUB_REPOSITORY,,}"
           VER="${{ steps.ver.outputs.version }}"
-          echo "repo=${REPO}" >> $GITHUB_OUTPUT
-          echo "version=${VER}" >> $GITHUB_OUTPUT
-          echo "icon_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/assets/icon.png" >> $GITHUB_OUTPUT
-
-          # If pushing a tag vX.Y.Z, publish X.Y.Z and latest
-          # Otherwise (main), still publish X.Y.Z and latest for convenience
-          echo "tags=${REPO}:${VER},${REPO}:latest" >> $GITHUB_OUTPUT
+          echo "repo=${REPO}" >> "$GITHUB_OUTPUT"
+          echo "version=${VER}" >> "$GITHUB_OUTPUT"
+          echo "icon_url=https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/assets/icon.png" >> "$GITHUB_OUTPUT"
+          # Tag as version and latest
+          echo "tags=${REPO}:${VER},${REPO}:latest" >> "$GITHUB_OUTPUT"
+          echo "Will push tags: ${REPO}:${VER} and latest"
 
       - name: Build and push multi-arch
         uses: docker/build-push-action@v6
