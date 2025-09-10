@@ -130,7 +130,7 @@ services:
       - "127.0.0.1:7682:7682"
     # Optional persistence:
     # volumes:
-    #   - ashigaru-data:/home/ashigaru
+    #   - ./ashigaru-data:/home/ashigaru
     restart: unless-stopped
 
 # volumes:
